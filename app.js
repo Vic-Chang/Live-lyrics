@@ -323,8 +323,15 @@ const ROUTES = [
 ];
 let routeIndex = Number(store.get('routeIndex', 0)) || 0; // 記住上次成功的路線
 
+// 歌詞網站本身故障（伺服器回 5xx）：換中繼也沒用，直接告訴使用者
+class OutageError extends Error {
+  constructor(status) { super('HTTP ' + status); this.name = 'OutageError'; this.status = status; }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function fetchJSON(url, outerSignal) {
-  const order = [routeIndex, ...ROUTES.keys()].filter((v, i, a) => a.indexOf(v) === i && ROUTES[v]);
+  // 一律先試直接連線，再試上次成功的中繼
+  const order = [0, routeIndex, ...ROUTES.keys()].filter((v, i, a) => a.indexOf(v) === i && ROUTES[v]);
   const errors = [];
   for (const i of order) {
     if (outerSignal.aborted) throw new DOMException('aborted', 'AbortError');
@@ -334,7 +341,14 @@ async function fetchJSON(url, outerSignal) {
     const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
       if (i !== 0) setStatus(`連線比較慢，換一條路線再試（${ROUTES[i].name}）…`, 'loading');
-      const res = await fetch(ROUTES[i].wrap(url), { signal: ctrl.signal });
+      let res = await fetch(ROUTES[i].wrap(url), { signal: ctrl.signal });
+      if (i === 0 && res.status >= 500) {
+        // 直接連線有通，但 LRCLIB 伺服器出錯：等一下再試一次
+        setStatus('歌詞網站回應有點慢，再試一次…', 'loading');
+        await sleep(1500);
+        res = await fetch(url, { signal: ctrl.signal });
+        if (res.status >= 500) throw new OutageError(res.status);
+      }
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (!Array.isArray(data)) throw new Error('回應格式不正確');
@@ -343,6 +357,7 @@ async function fetchJSON(url, outerSignal) {
       return data;
     } catch (err) {
       if (outerSignal.aborted) throw new DOMException('aborted', 'AbortError');
+      if (err.name === 'OutageError') throw err; // 網站本身故障，不用再試中繼
       errors.push(`${ROUTES[i].name}：${err.name === 'AbortError' ? '逾時' : err.message}`);
     } finally {
       clearTimeout(timer);
@@ -386,6 +401,11 @@ async function search(q) {
     }
   } catch (err) {
     if (err.name === 'AbortError') return;
+    if (err.name === 'OutageError') {
+      setStatus('歌詞資料庫（LRCLIB）目前暫時故障，不是你的網路問題。請過幾分鐘再搜尋一次。', 'error', '詳細：LRCLIB 伺服器回應 ' + err.message);
+      els.examples.hidden = false;
+      return;
+    }
     setStatus('連不上歌詞網站。可能是網路（例如公司網路）或瀏覽器外掛（例如廣告封鎖）擋住了，請換個網路（例如手機 4G/5G）或關掉外掛再試。', 'error', '詳細：' + err.message);
     els.examples.hidden = false;
   }
