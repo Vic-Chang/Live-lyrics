@@ -29,3 +29,8 @@ python3 -m http.server 8000
 > 语音输入需使用 Chrome、Edge 或 Safari，且需允许麦克风权限。
 > Chrome 的麦克风权限只在 `https://` 或 `http://localhost` 下可用，
 > 建议用上面的方式启动，或部署到 GitHub Pages。
+
+## 连线说明
+
+搜索时会先直接连到 LRCLIB。如果被网络（例如公司防火墙）或浏览器挡住，会自动改用公开的中继服务
+（allorigins、corsproxy.io、codetabs）再试，并记住成功的路线。走中继时，搜索的关键字会经过这些第三方服务。

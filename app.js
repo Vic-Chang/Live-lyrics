@@ -280,6 +280,43 @@ setFont(store.get('lyricSize', 26));
 /* ======================= 搜索 ======================= */
 let searchCtrl = null;
 
+// 连线路线：先直连 LRCLIB；被网络或浏览器挡住时，改走公开的中继服务
+const ROUTES = [
+  { name: '直连', wrap: (u) => u },
+  { name: '中继 1', wrap: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+  { name: '中继 2', wrap: (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
+  { name: '中继 3', wrap: (u) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
+];
+let routeIndex = Number(store.get('routeIndex', 0)) || 0; // 记住上次成功的路线
+
+async function fetchJSON(url, outerSignal) {
+  const order = [routeIndex, ...ROUTES.keys()].filter((v, i, a) => a.indexOf(v) === i && ROUTES[v]);
+  const errors = [];
+  for (const i of order) {
+    if (outerSignal.aborted) throw new DOMException('aborted', 'AbortError');
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    outerSignal.addEventListener('abort', onAbort);
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      if (i !== 0) setStatus(`直连失败，改用${ROUTES[i].name}搜索中…`);
+      const res = await fetch(ROUTES[i].wrap(url), { signal: ctrl.signal });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error('回应格式不对');
+      routeIndex = i; store.set('routeIndex', i);
+      return data;
+    } catch (err) {
+      if (outerSignal.aborted) throw new DOMException('aborted', 'AbortError');
+      errors.push(`${ROUTES[i].name}：${err.name === 'AbortError' ? '逾时' : err.message}`);
+    } finally {
+      clearTimeout(timer);
+      outerSignal.removeEventListener('abort', onAbort);
+    }
+  }
+  throw new Error(errors.join('；'));
+}
+
 async function search(q) {
   q = q.trim();
   if (!q) { setStatus('请输入要搜索的内容。'); return; }
@@ -289,9 +326,7 @@ async function search(q) {
   els.results.innerHTML = '';
 
   try {
-    const res = await fetch(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, { signal: searchCtrl.signal });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    let list = await res.json();
+    let list = await fetchJSON(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, searchCtrl.signal);
     // 有同步(时间轴)歌词的排前面
     list = list
       .filter((r) => r.syncedLyrics || r.plainLyrics || r.instrumental)
@@ -301,7 +336,7 @@ async function search(q) {
     setStatus(list.length ? `找到 ${list.length} 首，点一首来显示歌词。` : `找不到「${q}」的歌词，换个关键字试试。`);
   } catch (err) {
     if (err.name === 'AbortError') return;
-    setStatus('搜索失败：' + err.message + '（请检查网络连线）');
+    setStatus('搜索失败，所有连线方式都连不上歌词网站。可能是公司网络或浏览器外挂（广告拦截）挡住了，请换个网络（例如手机 4G/5G）或关掉外挂再试。详细：' + err.message);
   }
 }
 
