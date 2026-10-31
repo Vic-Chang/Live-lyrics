@@ -166,6 +166,19 @@ button:focus-visible, input:focus-visible, .line:focus-visible, .results li:focu
 .font-ctrl { display: flex; align-items: center; gap: 8px; }
 .font-ctrl input { width: 110px; accent-color: var(--accent); }
 
+/* ---------- 全螢幕 ---------- */
+.fs-btn { gap: 6px; }
+.now .font-ctrl { margin-left: auto; }
+.stage.is-fs { background: var(--bg); }
+.stage.is-fs .eyebrow, .stage.is-fs .tip { display: none !important; }
+.stage.is-fs .now { border-bottom-color: transparent; }
+/* 不支援全螢幕 API 的瀏覽器（例如 iPhone Safari）：用蓋滿畫面的方式模擬 */
+.stage.pseudo-fs {
+  position: fixed; inset: 0; z-index: 100; height: auto;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+body.fs-lock { overflow: hidden; }
+
 .tip {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin: 12px 24px 0; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 14px;
@@ -246,7 +259,7 @@ kbd { font-family: inherit; font-size: 11px; border: 1px solid var(--border); bo
   .foot > span:first-child { display: none; }
 }
 @media (max-width: 420px) {
-  .btn-label { display: none; }
+  .btn-label, .fs-label { display: none; }
   .font-ctrl input { width: 80px; }
 }
 @media (prefers-reduced-motion: reduce) {

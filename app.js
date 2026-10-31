@@ -636,6 +636,78 @@ els.form.addEventListener('submit', (e) => {
   search(els.input.value);
 });
 
+/* ======================= 全螢幕 ======================= */
+const fsBtn = $('fsBtn');
+const fsLabel = fsBtn.querySelector('.fs-label');
+const fsIcon = fsBtn.querySelector('.fs-icon');
+const nativeFS = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+let wakeLock = null;
+
+function isFS() { return fsElement() === els.stage || els.stage.classList.contains('pseudo-fs'); }
+
+async function enterFS() {
+  if (nativeFS) {
+    try {
+      await (els.stage.requestFullscreen ? els.stage.requestFullscreen() : els.stage.webkitRequestFullscreen());
+      return; // 由 fullscreenchange 更新畫面
+    } catch { /* 改用模擬全螢幕 */ }
+  }
+  els.stage.classList.add('pseudo-fs');
+  document.body.classList.add('fs-lock');
+  updateFS();
+}
+
+async function exitFS() {
+  if (fsElement()) {
+    try { await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen()); } catch { /* 忽略 */ }
+  }
+  els.stage.classList.remove('pseudo-fs');
+  document.body.classList.remove('fs-lock');
+  updateFS();
+}
+
+function toggleFS() { isFS() ? exitFS() : enterFS(); }
+
+// 全螢幕時讓螢幕保持亮著（手機上看歌詞時很有用）
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && 'wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch { wakeLock = null; }
+}
+
+function updateFS() {
+  const on = isFS();
+  els.stage.classList.toggle('is-fs', on);
+  fsLabel.textContent = on ? '離開全螢幕' : '全螢幕';
+  fsIcon.textContent = on ? '✕' : '⛶';
+  fsBtn.setAttribute('aria-label', on ? '離開全螢幕' : '全螢幕');
+  fsBtn.title = (on ? '離開全螢幕' : '全螢幕') + '（F 鍵）';
+  keepAwake(on);
+  // 版面大小改變後，把目前這句重新置中
+  const cur = state.lines[state.activeIndex];
+  if (cur && cur.el) requestAnimationFrame(() => scrollToLine(cur.el));
+}
+
+fsBtn.addEventListener('click', toggleFS);
+document.addEventListener('fullscreenchange', updateFS);
+document.addEventListener('webkitfullscreenchange', updateFS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isFS()) keepAwake(true);
+});
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  if (e.key === 'Escape' && els.stage.classList.contains('pseudo-fs')) exitFS();
+  else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleFS(); }
+});
+
 /* ======================= 歌詞來源設定 ======================= */
 const srcEls = { url: $('neteaseUrl'), save: $('neteaseSave'), clear: $('neteaseClear'), msg: $('neteaseMsg'), box: $('sourceBox') };
 function showNeteaseState() {
@@ -773,4 +845,7 @@ markLangChips();
 /* ======================= 讓第一句／最後一句也能置中 ======================= */
 new ResizeObserver(() => {
   els.lyrics.style.setProperty('--lyric-pad', Math.round(els.lyrics.clientHeight / 2) + 'px');
+  // 歌詞區大小改變（例如進出全螢幕、旋轉手機）後，把目前這句重新置中
+  const cur = state.lines[state.activeIndex];
+  if (cur && cur.el) requestAnimationFrame(() => scrollToLine(cur.el));
 }).observe(els.lyrics);
