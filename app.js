@@ -359,6 +359,9 @@ function loadSong(r) {
   renderLyrics();
   enableControls();
   tick(true);
+
+  // 选好歌就直接从头开始播放、歌词开始滚动
+  if (state.lines.length) { player.seek(0); player.play(); }
 }
 
 els.form.addEventListener('submit', (e) => {
