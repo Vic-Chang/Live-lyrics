@@ -382,11 +382,90 @@ async function fetchJSON(url, outerSignal) {
   throw new Error(errors.join('；'));
 }
 
+/* ======================= 網易雲音樂（NeteaseCloudMusicApi） =======================
+ * 使用者自己架設 NeteaseCloudMusicApi（或 api-enhanced），在設定裡填入網址。
+ * 搜尋：GET {base}/cloudsearch?keywords=…   歌詞：GET {base}/lyric?id=…
+ */
+let neteaseBase = store.get('neteaseApi', '');
+
+function normalizeBase(u) {
+  u = (u || '').trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+  return u.replace(/\/+$/, '');
+}
+
+async function fetchWithTimeout(url, signal, ms = 10000) {
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  if (signal) signal.addEventListener('abort', onAbort);
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } catch (err) {
+    if (signal && signal.aborted) throw err;
+    throw new Error(err.name === 'AbortError' ? '逾時' : err.message);
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onAbort);
+  }
+}
+
+async function neteaseJSON(path, signal) {
+  const res = await fetchWithTimeout(neteaseBase + path, signal);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (data && data.code && data.code !== 200) throw new Error('網易雲回應 ' + data.code + (data.message ? '：' + data.message : ''));
+  return data;
+}
+
+async function searchNetease(q, signal) {
+  const data = await neteaseJSON(`/cloudsearch?keywords=${encodeURIComponent(q)}&limit=30`, signal);
+  const songs = (data.result && data.result.songs) || [];
+  return songs.map((s) => ({
+    source: 'netease',
+    id: s.id,
+    trackName: s.name || '',
+    artistName: (s.ar || []).map((a) => a.name).filter(Boolean).join(' / '),
+    albumName: (s.al && s.al.name) || '',
+    duration: s.dt ? s.dt / 1000 : 0,
+    needsLyrics: true,
+  }));
+}
+
+async function fetchNeteaseLyrics(id, signal) {
+  const data = await neteaseJSON(`/lyric?id=${encodeURIComponent(id)}`, signal);
+  const lrc = (data.lrc && data.lrc.lyric) || '';
+  if (!lrc.trim()) return { syncedLyrics: null, plainLyrics: null };
+  if (parseLRC(lrc).length >= 2) return { syncedLyrics: lrc, plainLyrics: null };
+  // 沒有時間軸：去掉時間標記當純文字
+  const plain = lrc.split(/\r?\n/).map((l) => l.replace(/\[[^\]]*\]/g, '').trim())
+    .filter((l) => l && !l.startsWith('{')).join('\n');
+  return { syncedLyrics: null, plainLyrics: plain || null };
+}
+
+/* ======================= LRCLIB ======================= */
+async function searchLrclib(q, signal) {
+  const list = await fetchJSON(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, signal);
+  return list
+    .filter((r) => r.syncedLyrics || r.plainLyrics)
+    // 會跟著捲動（有時間）的歌詞排前面
+    .sort((a, b) => (b.syncedLyrics ? 1 : 0) - (a.syncedLyrics ? 1 : 0))
+    .map((r) => ({ ...r, source: 'lrclib' }));
+}
+
+function lrclibErrorText(err) {
+  if (err.name === 'OutageError') return 'LRCLIB 目前暫時故障（伺服器回應 ' + err.message + '）';
+  return 'LRCLIB 連不上（' + err.message + '）';
+}
+
+/* ======================= 搜尋 ======================= */
 async function search(q) {
   q = q.trim();
   if (!q) { setStatus('請先輸入歌名或歌手。', 'error'); els.input.focus(); return; }
   if (searchCtrl) searchCtrl.abort();
   searchCtrl = new AbortController();
+  const signal = searchCtrl.signal;
   els.input.value = q;
   setStatus(`正在搜尋「${q}」…`, 'loading');
   els.results.innerHTML = '';
@@ -394,34 +473,42 @@ async function search(q) {
   els.examples.hidden = true;
   els.legend.hidden = true;
 
-  try {
-    const signal = searchCtrl.signal;
-    let list = await fetchJSON(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, signal);
-    const conv = await getS2T();
-    if (signal.aborted) return;
-    list = list
-      .map((r) => toTraditionalSong(r, conv))
-      .filter((r) => r.syncedLyrics || r.plainLyrics)
-      // 會跟著捲動（有時間）的歌詞排前面
-      .sort((a, b) => (b.syncedLyrics ? 1 : 0) - (a.syncedLyrics ? 1 : 0))
-      .slice(0, 40);
-    renderResults(list);
-    if (list.length) {
-      els.resultCount.textContent = `共 ${list.length} 首`;
-      els.legend.hidden = false;
-      setStatus('點一首歌，歌詞就會開始捲動。');
-    } else {
-      setStatus(`找不到「${q}」的歌詞。可以試試只打歌名，或換成歌手名字。`, 'error');
-      els.examples.hidden = false;
-    }
-  } catch (err) {
-    if (err.name === 'AbortError') return;
-    if (err.name === 'OutageError') {
-      setStatus('歌詞資料庫（LRCLIB）目前暫時故障，不是你的網路問題。請過幾分鐘再搜尋一次。', 'error', '詳細：LRCLIB 伺服器回應 ' + err.message);
-      els.examples.hidden = false;
-      return;
-    }
-    setStatus('連不上歌詞網站。可能是網路（例如公司網路）或瀏覽器外掛（例如廣告封鎖）擋住了，請換個網路（例如手機 4G/5G）或關掉外掛再試。', 'error', '詳細：' + err.message);
+  // 網易雲（有設定才搜）優先，LRCLIB 同時搜尋當備用
+  const [ne, lr] = await Promise.allSettled([
+    neteaseBase ? searchNetease(q, signal) : Promise.resolve(null),
+    searchLrclib(q, signal),
+  ]);
+  if (signal.aborted) return;
+
+  const conv = await getS2T();
+  if (signal.aborted) return;
+
+  const neList = ne.status === 'fulfilled' && ne.value ? ne.value : [];
+  const lrList = lr.status === 'fulfilled' ? lr.value : [];
+  const list = [...neList, ...lrList].slice(0, 60).map((r) => {
+    const t = toTraditionalSong(r, conv);
+    t.original = r; // 載入歌詞後若發現是日文，改回原文
+    return t;
+  });
+  renderResults(list);
+
+  // 哪個來源失敗，就在下面註明
+  const notes = [];
+  if (neteaseBase && ne.status === 'rejected') notes.push('網易雲連不上（' + ne.reason.message + '）');
+  if (lr.status === 'rejected') notes.push(lrclibErrorText(lr.reason));
+
+  if (list.length) {
+    els.resultCount.textContent = `共 ${list.length} 首`;
+    els.legend.hidden = false;
+    setStatus('點一首歌，歌詞就會開始捲動。', '', notes.length ? '提醒：' + notes.join('；') + '，以下只顯示其他來源的結果。' : '');
+  } else if (notes.length && (!neteaseBase || ne.status === 'rejected') && lr.status === 'rejected') {
+    const onlyOutage = !neteaseBase && lr.reason.name === 'OutageError';
+    setStatus(onlyOutage
+      ? '歌詞資料庫（LRCLIB）目前暫時故障，不是你的網路問題。請過幾分鐘再試，或在下方「歌詞來源設定」加上網易雲。'
+      : '所有歌詞來源都搜尋失敗。', 'error', '詳細：' + notes.join('；'));
+    els.examples.hidden = false;
+  } else {
+    setStatus(`找不到「${q}」的歌詞。可以試試只打歌名，或換成歌手名字。`, 'error', notes.join('；'));
     els.examples.hidden = false;
   }
 }
@@ -446,8 +533,13 @@ function renderResults(list) {
     const side = document.createElement('div');
     side.className = 'r-side';
     const badge = document.createElement('span');
-    badge.className = 'badge' + (r.syncedLyrics ? ' synced' : '');
-    badge.textContent = r.syncedLyrics ? '✓ 會跟著捲動' : '只有文字';
+    if (r.source === 'netease') {
+      badge.className = 'badge netease';
+      badge.textContent = '網易雲';
+    } else {
+      badge.className = 'badge' + (r.syncedLyrics ? ' synced' : '');
+      badge.textContent = r.syncedLyrics ? '✓ 會跟著捲動' : '只有文字';
+    }
     const dur = document.createElement('span');
     dur.className = 'r-dur';
     dur.textContent = r.duration ? fmt(r.duration) : '';
@@ -457,12 +549,43 @@ function renderResults(list) {
     const pick = () => {
       els.results.querySelectorAll('li.active').forEach((x) => x.classList.remove('active'));
       li.classList.add('active');
-      loadSong(r);
+      pickSong(r);
     };
     li.addEventListener('click', pick);
     li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
     els.results.appendChild(li);
   });
+}
+
+// 網易雲的歌要點了才去抓歌詞
+let pickToken = 0;
+async function pickSong(r) {
+  const token = ++pickToken;
+  if (!r.needsLyrics) { loadSong(r); return; }
+
+  player.pause();
+  els.title.textContent = r.trackName || '';
+  els.artist.textContent = [r.artistName, r.albumName].filter(Boolean).join(' · ');
+  els.lyrics.innerHTML = '<div class="placeholder">正在載入歌詞…</div>';
+  state.lines = [];
+  enableControls();
+
+  try {
+    const lyr = await fetchNeteaseLyrics(r.id);
+    if (token !== pickToken) return;
+    let song = { ...r.original, ...lyr, needsLyrics: false };
+    song = toTraditionalSong(song, await getS2T()); // 日文歌（有假名）不轉換
+    if (token !== pickToken) return;
+    Object.assign(r, song, { original: r.original }); // 下次點同一首不用再抓
+    loadSong(song);
+  } catch (err) {
+    if (token !== pickToken) return;
+    els.lyrics.innerHTML = '';
+    const d = document.createElement('div');
+    d.className = 'placeholder';
+    d.textContent = '這首歌的歌詞載入失敗（' + err.message + '），請再點一次或換一首。';
+    els.lyrics.appendChild(d);
+  }
 }
 
 function loadSong(r) {
@@ -512,6 +635,42 @@ els.form.addEventListener('submit', (e) => {
   e.preventDefault();
   search(els.input.value);
 });
+
+/* ======================= 歌詞來源設定 ======================= */
+const srcEls = { url: $('neteaseUrl'), save: $('neteaseSave'), clear: $('neteaseClear'), msg: $('neteaseMsg'), box: $('sourceBox') };
+function showNeteaseState() {
+  srcEls.url.value = neteaseBase;
+  srcEls.clear.hidden = !neteaseBase;
+  if (!neteaseBase) srcEls.msg.textContent = '目前只使用 LRCLIB。';
+}
+srcEls.save.addEventListener('click', async () => {
+  const base = normalizeBase(srcEls.url.value);
+  if (!base) { srcEls.msg.textContent = '請輸入網址，例如 http://localhost:3000'; return; }
+  srcEls.msg.className = 'hint';
+  srcEls.msg.textContent = '測試連線中…';
+  const prev = neteaseBase;
+  neteaseBase = base;
+  try {
+    const list = await searchNetease('晴天');
+    store.set('neteaseApi', base);
+    srcEls.msg.className = 'hint ok';
+    srcEls.msg.textContent = `✓ 連線成功（試搜「晴天」找到 ${list.length} 首）。之後會先搜尋網易雲。`;
+  } catch (err) {
+    neteaseBase = prev;
+    srcEls.msg.className = 'hint bad';
+    srcEls.msg.textContent = '連不上這個網址（' + err.message + '）。請確認服務有在執行、網址和連接埠正確。';
+  }
+  showNeteaseState();
+  srcEls.url.value = base;
+});
+srcEls.clear.addEventListener('click', () => {
+  neteaseBase = '';
+  store.set('neteaseApi', '');
+  srcEls.msg.className = 'hint';
+  showNeteaseState();
+});
+showNeteaseState();
+if (neteaseBase) srcEls.msg.textContent = '已設定網易雲，搜尋時會優先使用。';
 
 /* ======================= 語音輸入 ======================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;

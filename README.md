@@ -34,3 +34,38 @@ python3 -m http.server 8000
 （allorigins、corsproxy.io、codetabs）再試，並記住成功的路線。走中繼時，搜尋的關鍵字會經過這些第三方服務。
 
 簡體轉正體使用 [opencc-js](https://github.com/nk2028/opencc-js)（從 jsDelivr 載入）。如果載入失敗，會直接顯示原本的歌詞。
+
+## 加上網易雲音樂（NeteaseCloudMusicApi）
+
+設定後，搜尋會**先找網易雲**，再找 LRCLIB；任一來源失敗時，仍會顯示另一個來源的結果。
+網頁本身不包含網易雲服務，需要你自己執行 [NeteaseCloudMusicApi](https://github.com/neteasecloudmusicapienhanced/api-enhanced)（以下用社群維護的 api-enhanced 版本）。
+
+### 1. 執行服務（擇一）
+
+**Docker：**
+
+```bash
+docker run -d -p 3000:3000 --name ncm-api moefurina/ncm-api:latest
+```
+
+**Node.js（需要 Node.js 22 以上）：**
+
+```bash
+git clone https://github.com/neteasecloudmusicapienhanced/api-enhanced.git
+cd api-enhanced
+pnpm i        # 或 npm install
+node app.js   # 預設在 http://localhost:3000
+```
+
+### 2. 在網頁上設定
+
+打開 Live Lyrics → 左下角「⚙ 歌詞來源設定」→ 填入 `http://localhost:3000` → 按「儲存並測試」。
+看到「✓ 連線成功」就完成了，之後搜尋會優先使用網易雲。
+
+### 注意事項
+
+- 網頁用到的只有 `/cloudsearch`（搜尋）和 `/lyric`（歌詞）兩個功能，不需要登入網易雲帳號。
+- 從 `https://` 網址（例如 GitHub Pages）連到 `http://localhost:3000` 時，Chrome 可能會詢問是否允許存取「區域網路裝置」，請按允許。
+  如果被擋，也可以在本機用 `python3 -m http.server 8000` 開啟網頁（網址 `http://localhost:8000`）。
+- 服務架在海外主機（例如 Vercel）時，網易雲可能限制海外連線，在台灣的電腦上執行最穩定。
+- NeteaseCloudMusicApi 是第三方非官方專案，不是網易官方提供的 API，僅建議用於個人研究與自用。

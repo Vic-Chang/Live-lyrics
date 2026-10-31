@@ -73,7 +73,20 @@
       <div id="legend" class="legend" hidden>
         <div><span class="badge synced">✓ 會跟著捲動</span> 歌詞有標時間，捲動最準</div>
         <div><span class="badge">只有文字</span> 沒有時間，捲動速度是估算的</div>
+        <div><span class="badge netease">網易雲</span> 來自網易雲音樂，點了才載入歌詞</div>
       </div>
+
+      <details id="sourceBox" class="sources">
+        <summary>⚙ 歌詞來源設定</summary>
+        <p class="hint">加上網易雲音樂後，搜尋會<b>先找網易雲</b>，再找 LRCLIB。需要你自己執行 NeteaseCloudMusicApi 服務（做法見 README）。</p>
+        <label class="field-label" for="neteaseUrl">網易雲服務網址</label>
+        <div class="field-row">
+          <input id="neteaseUrl" type="text" inputmode="url" placeholder="例如：http://localhost:3000" spellcheck="false" />
+          <button id="neteaseSave" type="button" class="btn small primary">儲存並測試</button>
+        </div>
+        <button id="neteaseClear" type="button" class="btn small" hidden>移除網易雲，只用 LRCLIB</button>
+        <p id="neteaseMsg" class="hint" role="status"></p>
+      </details>
     </aside>
 
     <section class="stage">
