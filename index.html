@@ -1,80 +1,70 @@
 <!doctype html>
-<html lang="zh-Hans">
+<html lang="zh-Hant-TW">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Live Lyrics 滚动歌词</title>
+  <title>Live Lyrics 滾動歌詞</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="topbar">
     <h1>🎵 Live Lyrics</h1>
     <form id="searchForm" class="search" autocomplete="off">
-      <input id="searchInput" type="search" placeholder="输入歌名 / 歌手 / 一句歌词…" aria-label="搜索歌词" />
-      <select id="voiceLang" title="语音识别语言" aria-label="语音识别语言">
-        <option value="zh-TW">中文(台湾)</option>
-        <option value="zh-CN">中文(大陆)</option>
-        <option value="zh-HK">粤语</option>
+      <input id="searchInput" type="search" placeholder="輸入歌名／歌手／一句歌詞…" aria-label="搜尋歌詞" />
+      <select id="voiceLang" title="語音辨識語言" aria-label="語音辨識語言">
+        <option value="zh-TW">中文（台灣）</option>
+        <option value="zh-CN">中文（中國）</option>
+        <option value="zh-HK">粵語</option>
         <option value="en-US">English</option>
         <option value="ja-JP">日本語</option>
         <option value="ko-KR">한국어</option>
       </select>
-      <button id="micBtn" type="button" class="icon-btn" title="语音搜索" aria-label="语音搜索">🎤</button>
-      <button type="submit" class="primary">搜索</button>
+      <button id="micBtn" type="button" class="icon-btn" title="語音搜尋" aria-label="語音搜尋">🎤</button>
+      <button type="submit" class="primary">搜尋</button>
     </form>
   </header>
 
   <main class="layout">
     <aside class="sidebar">
       <section class="panel">
-        <h2>搜索结果</h2>
-        <p id="status" class="status">输入关键字或按 🎤 用说的来搜索。</p>
+        <h2>搜尋結果</h2>
+        <p id="status" class="status">輸入關鍵字，或按 🎤 用說的來搜尋。</p>
         <ul id="results" class="results"></ul>
-      </section>
-
-      <section class="panel">
-        <h2>音乐来源</h2>
-        <label class="file-btn">
-          🎧 选择本机音乐档
-          <input id="audioFile" type="file" accept="audio/*" hidden />
-        </label>
-        <p id="audioName" class="hint">未载入音乐档：将以「歌词计时器」播放，歌词一样会滚动。</p>
-        <audio id="audio" preload="auto"></audio>
       </section>
     </aside>
 
     <section class="stage">
       <div class="now">
         <div>
-          <div id="songTitle" class="song-title">尚未选择歌曲</div>
+          <div id="songTitle" class="song-title">尚未選擇歌曲</div>
           <div id="songArtist" class="song-artist"></div>
         </div>
-        <div class="font-ctrl" aria-label="歌词大小">
-          <button id="fontDown" class="icon-btn" title="缩小歌词">A−</button>
-          <input id="fontRange" type="range" min="14" max="64" step="1" value="26" aria-label="歌词字号" />
-          <button id="fontUp" class="icon-btn" title="放大歌词">A+</button>
+        <div class="font-ctrl" aria-label="歌詞大小">
+          <button id="fontDown" class="icon-btn" title="縮小歌詞">A−</button>
+          <input id="fontRange" type="range" min="14" max="64" step="1" value="26" aria-label="歌詞字級" />
+          <button id="fontUp" class="icon-btn" title="放大歌詞">A+</button>
         </div>
       </div>
 
       <div id="lyrics" class="lyrics" tabindex="0">
-        <div class="placeholder">搜索歌曲后，歌词会显示在这里。<br />点任何一行歌词就会跳到那一段播放。</div>
+        <div class="placeholder">搜尋歌曲並點選後，歌詞會在這裡自動滾動。<br />點任何一行歌詞，就會跳到那一段繼續播放。</div>
       </div>
 
       <div class="controls">
-        <button id="playBtn" class="play" title="播放 / 暂停 (空白键)" disabled>▶</button>
+        <button id="playBtn" class="play" title="播放／暫停（空白鍵）" disabled>▶</button>
         <span id="curTime" class="time">0:00</span>
-        <input id="seek" type="range" min="0" max="0" step="0.1" value="0" disabled aria-label="播放进度" />
+        <input id="seek" type="range" min="0" max="0" step="0.1" value="0" disabled aria-label="播放進度" />
         <span id="durTime" class="time">0:00</span>
-        <div class="offset" title="歌词与音乐不同步时可微调">
-          <button id="offDown" class="icon-btn small">−</button>
+        <div class="offset" title="覺得歌詞太快或太慢時可以微調">
+          <button id="offDown" class="icon-btn small" aria-label="歌詞延後 0.5 秒">−</button>
           <span id="offVal">0.0s</span>
-          <button id="offUp" class="icon-btn small">+</button>
+          <button id="offUp" class="icon-btn small" aria-label="歌詞提早 0.5 秒">+</button>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="foot">歌词资料来源：<a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a></footer>
+  <footer class="foot">歌詞資料來源：<a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a></footer>
 
   <script src="app.js"></script>
 </body>

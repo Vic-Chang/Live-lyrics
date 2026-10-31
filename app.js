@@ -5,7 +5,6 @@ const $ = (id) => document.getElementById(id);
 const els = {
   form: $('searchForm'), input: $('searchInput'), mic: $('micBtn'), lang: $('voiceLang'),
   status: $('status'), results: $('results'),
-  audio: $('audio'), audioFile: $('audioFile'), audioName: $('audioName'),
   title: $('songTitle'), artist: $('songArtist'), lyrics: $('lyrics'),
   play: $('playBtn'), seek: $('seek'), cur: $('curTime'), dur: $('durTime'),
   fontDown: $('fontDown'), fontUp: $('fontUp'), fontRange: $('fontRange'),
@@ -14,91 +13,67 @@ const els = {
 
 const LRCLIB = 'https://lrclib.net/api';
 
-/* ======================= 状态 ======================= */
+/* ======================= 狀態 ======================= */
 const state = {
   lines: [],          // [{ time, text, el }]
   synced: false,
   activeIndex: -1,
-  offset: 0,          // 秒；正数 = 歌词提早出现
-  userScrollUntil: 0, // 使用者手动滚动后暂停自动滚动
+  offset: 0,          // 秒；正數 = 歌詞提早出現
+  userScrollUntil: 0, // 使用者手動捲動後，暫停自動捲動
   song: null,
 };
 
 /* ======================= 小工具 ======================= */
 const fmt = (s) => {
   if (!isFinite(s) || s < 0) s = 0;
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${String(sec).padStart(2, '0')}`;
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 };
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 忽略 */ } },
 };
 const setStatus = (msg) => { els.status.textContent = msg; };
 
-/* ======================= 播放器 =======================
- * 两种模式：
- *  - audio：使用者载入本机音乐档，用 <audio> 播放
- *  - clock：没有音乐档时，用计时器模拟播放，歌词照样滚动
+/* ======================= 播放計時器 =======================
+ * 不播放音樂，只用計時器讓歌詞依時間軸滾動。
  */
 const player = {
-  mode: 'clock',
   playing: false,
-  base: 0,        // clock 模式：暂停时的时间点
-  startedAt: 0,   // clock 模式：开始播放的 performance.now()
-  clockDuration: 0,
+  base: 0,       // 暫停時的時間點（秒）
+  startedAt: 0,  // 開始播放時的 performance.now()
+  duration: 0,
 
-  get duration() {
-    if (this.mode === 'audio') return isFinite(els.audio.duration) ? els.audio.duration : 0;
-    return this.clockDuration;
-  },
   get time() {
-    if (this.mode === 'audio') return els.audio.currentTime;
-    if (!this.playing) return this.base;
-    return this.base + (performance.now() - this.startedAt) / 1000;
+    return this.playing ? this.base + (performance.now() - this.startedAt) / 1000 : this.base;
   },
   play() {
-    if (this.mode === 'audio') {
-      els.audio.play().catch((e) => setStatus('无法播放音乐：' + e.message));
-    } else {
-      this.startedAt = performance.now();
-      this.playing = true;
-    }
+    if (this.duration && this.base >= this.duration) this.base = 0;
+    this.startedAt = performance.now();
     this.playing = true;
     updatePlayBtn();
   },
   pause() {
-    if (this.mode === 'audio') els.audio.pause();
-    else this.base = this.time;
+    this.base = this.time;
     this.playing = false;
     updatePlayBtn();
   },
   toggle() { this.playing ? this.pause() : this.play(); },
   seek(t) {
-    t = Math.max(0, Math.min(t, this.duration || t));
-    if (this.mode === 'audio') {
-      els.audio.currentTime = t;
-    } else {
-      this.base = t;
-      this.startedAt = performance.now();
-    }
-    state.userScrollUntil = 0; // 跳转后立即恢复自动滚动
+    this.base = Math.max(0, Math.min(t, this.duration || t));
+    this.startedAt = performance.now();
+    state.userScrollUntil = 0; // 跳轉後立刻恢復自動捲動
     tick(true);
   },
 };
 
-function updatePlayBtn() {
-  els.play.textContent = player.playing ? '❚❚' : '▶';
-}
-
+function updatePlayBtn() { els.play.textContent = player.playing ? '❚❚' : '▶'; }
 function enableControls() {
-  const ok = state.lines.length > 0 || player.mode === 'audio';
+  const ok = state.lines.length > 0;
   els.play.disabled = !ok;
   els.seek.disabled = !ok;
 }
 
-/* ======================= 歌词解析 ======================= */
+/* ======================= 歌詞解析 ======================= */
 function parseLRC(text) {
   const out = [];
   let offset = 0;
@@ -106,7 +81,7 @@ function parseLRC(text) {
   const tagRe = /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g;
 
   for (const raw of text.split(/\r?\n/)) {
-    const off = raw.match(/^\[offset:\s*([+-]?\d+)\s*\]/i);
+    const off = raw.match(/^\s*\[offset:\s*([+-]?\d+)\s*\]/i);
     if (off) { offset = Number(off[1]) / 1000; continue; }
     const m = raw.match(lineRe);
     if (!m) continue;
@@ -121,29 +96,30 @@ function parseLRC(text) {
   return out.sort((a, b) => a.time - b.time);
 }
 
-// 没有时间轴的纯文字歌词：平均分配到整首歌长度
+// 沒有時間軸的純文字歌詞：平均分配到整首歌的長度
 function plainToLines(text, duration) {
   const rows = text.split(/\r?\n/).map((s) => s.trim());
   while (rows.length && !rows[rows.length - 1]) rows.pop();
+  while (rows.length && !rows[0]) rows.shift();
   const total = duration > 0 ? duration : rows.length * 4;
   const step = total / Math.max(rows.length, 1);
   return rows.map((txt, i) => ({ time: i * step, text: txt }));
 }
 
-/* ======================= 歌词显示 ======================= */
+/* ======================= 歌詞顯示 ======================= */
 function renderLyrics() {
   const box = els.lyrics;
   box.innerHTML = '';
   state.activeIndex = -1;
 
   if (!state.lines.length) {
-    box.innerHTML = '<div class="placeholder">这首歌没有歌词资料（可能是纯音乐）。</div>';
+    box.innerHTML = '<div class="placeholder">這首歌沒有歌詞資料（可能是純音樂）。</div>';
     return;
   }
   if (!state.synced) {
     const n = document.createElement('div');
     n.className = 'notice';
-    n.textContent = '⚠ 这首歌只有纯文字歌词，滚动时间是依歌曲长度平均估算的。';
+    n.textContent = '⚠ 這首歌只有純文字歌詞，滾動時間是依歌曲長度平均估算的。';
     box.appendChild(n);
   }
 
@@ -153,7 +129,7 @@ function renderLyrics() {
     el.className = 'line' + (line.text ? '' : ' empty');
     el.textContent = line.text || '♪';
     el.dataset.index = i;
-    el.title = '从 ' + fmt(line.time) + ' 开始播放';
+    el.title = '從 ' + fmt(line.time) + ' 開始播放';
     line.el = el;
     frag.appendChild(el);
   });
@@ -161,7 +137,7 @@ function renderLyrics() {
   box.scrollTop = 0;
 }
 
-// 点任何一行歌词 → 跳到那一段播放
+// 點任何一行歌詞 → 跳到那一段播放
 els.lyrics.addEventListener('click', (e) => {
   const el = e.target.closest('.line');
   if (!el) return;
@@ -171,7 +147,7 @@ els.lyrics.addEventListener('click', (e) => {
   if (!player.playing) player.play();
 });
 
-// 使用者自己滚动歌词时，暂停自动滚动 3 秒
+// 使用者自己捲動歌詞時，暫停自動捲動 3 秒
 ['wheel', 'touchmove'].forEach((ev) =>
   els.lyrics.addEventListener(ev, () => { state.userScrollUntil = performance.now() + 3000; }, { passive: true })
 );
@@ -188,8 +164,7 @@ function findActiveIndex(t) {
 
 function scrollToLine(el) {
   const box = els.lyrics;
-  const top = el.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2;
-  box.scrollTo({ top, behavior: 'smooth' });
+  box.scrollTo({ top: el.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2, behavior: 'smooth' });
 }
 
 function setActive(idx, force) {
@@ -199,25 +174,23 @@ function setActive(idx, force) {
   state.lines.forEach((l, i) => l.el && l.el.classList.toggle('past', i < idx));
   state.activeIndex = idx;
   const cur = state.lines[idx];
+  const canScroll = performance.now() > state.userScrollUntil;
   if (cur && cur.el) {
     cur.el.classList.add('active');
-    if (performance.now() > state.userScrollUntil) scrollToLine(cur.el);
-  } else if (idx < 0 && performance.now() > state.userScrollUntil) {
+    if (canScroll) scrollToLine(cur.el);
+  } else if (idx < 0 && canScroll) {
     els.lyrics.scrollTo({ top: 0, behavior: 'smooth' });
   }
 }
 
-/* ======================= 主循环 ======================= */
+/* ======================= 主迴圈 ======================= */
 let seeking = false;
 function tick(force) {
   const t = player.time;
   const dur = player.duration;
 
-  // clock 模式播到结尾自动停止
-  if (player.mode === 'clock' && player.playing && dur && t >= dur) {
-    player.pause();
-    player.base = dur;
-  }
+  // 播到結尾自動停止
+  if (player.playing && dur && t >= dur) { player.pause(); player.base = dur; }
 
   if (!seeking) {
     els.seek.max = dur || 0;
@@ -235,20 +208,16 @@ els.play.addEventListener('click', () => player.toggle());
 els.seek.addEventListener('input', () => { seeking = true; els.cur.textContent = fmt(Number(els.seek.value)); });
 els.seek.addEventListener('change', () => { seeking = false; player.seek(Number(els.seek.value)); });
 
-els.audio.addEventListener('play', () => { player.playing = true; updatePlayBtn(); });
-els.audio.addEventListener('pause', () => { player.playing = false; updatePlayBtn(); });
-els.audio.addEventListener('ended', () => { player.playing = false; updatePlayBtn(); });
-
 document.addEventListener('keydown', (e) => {
   const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+  if (tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'button') return;
   if (els.play.disabled) return;
   if (e.code === 'Space') { e.preventDefault(); player.toggle(); }
-  else if (e.code === 'ArrowRight') { player.seek(player.time + 5); }
-  else if (e.code === 'ArrowLeft') { player.seek(player.time - 5); }
+  else if (e.code === 'ArrowRight') player.seek(player.time + 5);
+  else if (e.code === 'ArrowLeft') player.seek(player.time - 5);
 });
 
-/* ======================= 歌词与音乐时间微调 ======================= */
+/* ======================= 歌詞時間微調 ======================= */
 function setOffset(v) {
   state.offset = Math.round(v * 10) / 10;
   els.offVal.textContent = (state.offset > 0 ? '+' : '') + state.offset.toFixed(1) + 's';
@@ -257,7 +226,7 @@ function setOffset(v) {
 els.offUp.addEventListener('click', () => setOffset(state.offset + 0.5));
 els.offDown.addEventListener('click', () => setOffset(state.offset - 0.5));
 
-/* ======================= 字体大小 ======================= */
+/* ======================= 字體大小 ======================= */
 function setFont(px) {
   px = Math.max(14, Math.min(64, Math.round(px)));
   document.documentElement.style.setProperty('--lyric-size', px + 'px');
@@ -269,7 +238,7 @@ function setFont(px) {
 els.fontUp.addEventListener('click', () => setFont(Number(els.fontRange.value) + 2));
 els.fontDown.addEventListener('click', () => setFont(Number(els.fontRange.value) - 2));
 els.fontRange.addEventListener('input', () => setFont(Number(els.fontRange.value)));
-// Ctrl + 滚轮 也能缩放歌词
+// Ctrl + 滾輪 也能縮放歌詞
 els.lyrics.addEventListener('wheel', (e) => {
   if (!e.ctrlKey) return;
   e.preventDefault();
@@ -277,17 +246,17 @@ els.lyrics.addEventListener('wheel', (e) => {
 }, { passive: false });
 setFont(store.get('lyricSize', 26));
 
-/* ======================= 搜索 ======================= */
+/* ======================= 搜尋 ======================= */
 let searchCtrl = null;
 
-// 连线路线：先直连 LRCLIB；被网络或浏览器挡住时，改走公开的中继服务
+// 連線路線：先直接連 LRCLIB；被網路或瀏覽器擋住時，改走公開的中繼服務
 const ROUTES = [
-  { name: '直连', wrap: (u) => u },
-  { name: '中继 1', wrap: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
-  { name: '中继 2', wrap: (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
-  { name: '中继 3', wrap: (u) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
+  { name: '直接連線', wrap: (u) => u },
+  { name: '中繼 1', wrap: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+  { name: '中繼 2', wrap: (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
+  { name: '中繼 3', wrap: (u) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
 ];
-let routeIndex = Number(store.get('routeIndex', 0)) || 0; // 记住上次成功的路线
+let routeIndex = Number(store.get('routeIndex', 0)) || 0; // 記住上次成功的路線
 
 async function fetchJSON(url, outerSignal) {
   const order = [routeIndex, ...ROUTES.keys()].filter((v, i, a) => a.indexOf(v) === i && ROUTES[v]);
@@ -299,16 +268,17 @@ async function fetchJSON(url, outerSignal) {
     outerSignal.addEventListener('abort', onAbort);
     const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
-      if (i !== 0) setStatus(`直连失败，改用${ROUTES[i].name}搜索中…`);
+      if (i !== 0) setStatus(`改用${ROUTES[i].name}搜尋中…`);
       const res = await fetch(ROUTES[i].wrap(url), { signal: ctrl.signal });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
-      if (!Array.isArray(data)) throw new Error('回应格式不对');
-      routeIndex = i; store.set('routeIndex', i);
+      if (!Array.isArray(data)) throw new Error('回應格式不正確');
+      routeIndex = i;
+      store.set('routeIndex', i);
       return data;
     } catch (err) {
       if (outerSignal.aborted) throw new DOMException('aborted', 'AbortError');
-      errors.push(`${ROUTES[i].name}：${err.name === 'AbortError' ? '逾时' : err.message}`);
+      errors.push(`${ROUTES[i].name}：${err.name === 'AbortError' ? '逾時' : err.message}`);
     } finally {
       clearTimeout(timer);
       outerSignal.removeEventListener('abort', onAbort);
@@ -319,24 +289,24 @@ async function fetchJSON(url, outerSignal) {
 
 async function search(q) {
   q = q.trim();
-  if (!q) { setStatus('请输入要搜索的内容。'); return; }
+  if (!q) { setStatus('請輸入要搜尋的內容。'); return; }
   if (searchCtrl) searchCtrl.abort();
   searchCtrl = new AbortController();
-  setStatus(`正在搜索「${q}」…`);
+  setStatus(`正在搜尋「${q}」…`);
   els.results.innerHTML = '';
 
   try {
     let list = await fetchJSON(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, searchCtrl.signal);
-    // 有同步(时间轴)歌词的排前面
+    // 有時間軸（可滾動）的歌詞排前面
     list = list
       .filter((r) => r.syncedLyrics || r.plainLyrics || r.instrumental)
       .sort((a, b) => (b.syncedLyrics ? 1 : 0) - (a.syncedLyrics ? 1 : 0))
       .slice(0, 40);
     renderResults(list);
-    setStatus(list.length ? `找到 ${list.length} 首，点一首来显示歌词。` : `找不到「${q}」的歌词，换个关键字试试。`);
+    setStatus(list.length ? `找到 ${list.length} 首，點一首就會開始播放歌詞。` : `找不到「${q}」的歌詞，換個關鍵字試試看。`);
   } catch (err) {
     if (err.name === 'AbortError') return;
-    setStatus('搜索失败，所有连线方式都连不上歌词网站。可能是公司网络或浏览器外挂（广告拦截）挡住了，请换个网络（例如手机 4G/5G）或关掉外挂再试。详细：' + err.message);
+    setStatus('搜尋失敗，所有連線方式都連不上歌詞網站。可能是公司網路或瀏覽器外掛（例如廣告封鎖）擋住了，請換個網路（例如手機 4G/5G）或關掉外掛再試。詳細：' + err.message);
   }
 }
 
@@ -346,7 +316,7 @@ function renderResults(list) {
     const li = document.createElement('li');
     const title = document.createElement('div');
     title.className = 'r-title';
-    title.textContent = r.trackName || '(未知歌名)';
+    title.textContent = r.trackName || '（未知歌名）';
     const meta = document.createElement('div');
     meta.className = 'r-meta';
     const who = document.createElement('span');
@@ -355,7 +325,7 @@ function renderResults(list) {
     dur.textContent = r.duration ? fmt(r.duration) : '';
     const badge = document.createElement('span');
     badge.className = 'badge' + (r.syncedLyrics ? ' synced' : '');
-    badge.textContent = r.syncedLyrics ? '滚动歌词' : r.instrumental ? '纯音乐' : '纯文字';
+    badge.textContent = r.syncedLyrics ? '滾動歌詞' : r.instrumental ? '純音樂' : '純文字';
     meta.append(who, dur, badge);
     li.append(title, meta);
     li.addEventListener('click', () => {
@@ -376,26 +346,23 @@ function loadSong(r) {
     state.lines = parseLRC(r.syncedLyrics);
     state.synced = true;
   } else if (r.plainLyrics) {
-    const d = player.mode === 'audio' && player.duration ? player.duration : r.duration;
-    state.lines = plainToLines(r.plainLyrics, d);
+    state.lines = plainToLines(r.plainLyrics, r.duration);
     state.synced = false;
   } else {
     state.lines = [];
     state.synced = false;
   }
 
-  // 计时器模式的总长度
   const lastT = state.lines.length ? state.lines[state.lines.length - 1].time : 0;
-  player.clockDuration = Math.max(r.duration || 0, lastT + 5);
-
-  // 切歌时，计时器模式从头开始
-  if (player.mode === 'clock') { player.pause(); player.base = 0; }
+  player.duration = Math.max(r.duration || 0, lastT + 5);
+  player.pause();
+  player.base = 0;
 
   renderLyrics();
   enableControls();
   tick(true);
 
-  // 选好歌就直接从头开始播放、歌词开始滚动
+  // 選好歌就直接從頭開始播放、歌詞開始滾動
   if (state.lines.length) { player.seek(0); player.play(); }
 }
 
@@ -404,7 +371,7 @@ els.form.addEventListener('submit', (e) => {
   search(els.input.value);
 });
 
-/* ======================= 语音输入 ======================= */
+/* ======================= 語音輸入 ======================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recog = null;
 let listening = false;
@@ -413,13 +380,13 @@ els.lang.value = store.get('voiceLang', 'zh-TW');
 els.lang.addEventListener('change', () => store.set('voiceLang', els.lang.value));
 
 if (!SR) {
-  els.mic.title = '这个浏览器不支援语音输入（请用 Chrome 或 Edge）';
+  els.mic.title = '這個瀏覽器不支援語音輸入（請使用 Chrome、Edge 或 Safari）';
   els.mic.style.opacity = .4;
 }
 
 els.mic.addEventListener('click', () => {
   if (!SR) {
-    setStatus('这个浏览器不支援语音输入，请改用 Chrome、Edge 或 Safari。');
+    setStatus('這個瀏覽器不支援語音輸入，請改用 Chrome、Edge 或 Safari。');
     return;
   }
   if (listening) { recog && recog.stop(); return; }
@@ -434,7 +401,7 @@ els.mic.addEventListener('click', () => {
   recog.onstart = () => {
     listening = true;
     els.mic.classList.add('listening');
-    setStatus('🎤 请说出歌名、歌手或一句歌词…');
+    setStatus('🎤 請說出歌名、歌手或一句歌詞…');
   };
   recog.onresult = (e) => {
     let interim = '';
@@ -446,54 +413,24 @@ els.mic.addEventListener('click', () => {
   };
   recog.onerror = (e) => {
     const msg = {
-      'not-allowed': '麦克风权限被拒绝，请在浏览器允许使用麦克风。',
-      'no-speech': '没有听到声音，请再试一次。',
-      'audio-capture': '找不到麦克风。',
-      'network': '语音识别需要网络连线。',
-    }[e.error] || '语音识别错误：' + e.error;
+      'not-allowed': '麥克風權限被拒絕，請在瀏覽器允許使用麥克風。',
+      'no-speech': '沒有聽到聲音，請再試一次。',
+      'audio-capture': '找不到麥克風。',
+      'network': '語音辨識需要網路連線。',
+    }[e.error] || '語音辨識錯誤：' + e.error;
     setStatus(msg);
   };
   recog.onend = () => {
     listening = false;
     els.mic.classList.remove('listening');
-    const q = els.input.value.trim();
-    if (finalText.trim() || q) search(finalText.trim() || q);
+    const q = finalText.trim() || els.input.value.trim();
+    if (q) search(q);
   };
 
-  try { recog.start(); } catch (err) { setStatus('无法启动语音识别：' + err.message); }
+  try { recog.start(); } catch (err) { setStatus('無法啟動語音辨識：' + err.message); }
 });
 
-/* ======================= 本机音乐档 ======================= */
-let objectUrl = null;
-els.audioFile.addEventListener('change', () => {
-  const file = els.audioFile.files[0];
-  if (!file) return;
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-  objectUrl = URL.createObjectURL(file);
-
-  if (player.mode === 'clock') player.pause();
-  player.mode = 'audio';
-  player.playing = false;
-  els.audio.src = objectUrl;
-  els.audioName.textContent = '🎧 ' + file.name;
-  updatePlayBtn();
-  enableControls();
-
-  els.audio.addEventListener('loadedmetadata', () => {
-    // 纯文字歌词：依实际音乐长度重新分配时间
-    if (state.song && !state.synced && state.song.plainLyrics) loadSong(state.song);
-    tick(true);
-  }, { once: true });
-
-  // 还没选歌的话，用档名自动帮忙搜索歌词
-  if (!state.song) {
-    const name = file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim();
-    els.input.value = name;
-    search(name);
-  }
-});
-
-/* ======================= 让第一句/最后一句也能置中 ======================= */
+/* ======================= 讓第一句／最後一句也能置中 ======================= */
 new ResizeObserver(() => {
   els.lyrics.style.setProperty('--lyric-pad', Math.round(els.lyrics.clientHeight / 2) + 'px');
 }).observe(els.lyrics);
