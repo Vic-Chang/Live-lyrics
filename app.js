@@ -329,6 +329,21 @@ class OutageError extends Error {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// LRCLIB 要求程式表明身分（瀏覽器不能改 User-Agent，所以用 Lrclib-Client 標頭）
+const CLIENT_ID = 'LiveLyrics/1.0 (https://github.com/Vic-Chang/Live-lyrics)';
+let sendClientHeader = true;
+async function fetchDirect(url, signal) {
+  if (sendClientHeader) {
+    try {
+      return await fetch(url, { signal, headers: { 'Lrclib-Client': CLIENT_ID } });
+    } catch (err) {
+      if (signal.aborted) throw err;
+      sendClientHeader = false; // 瀏覽器擋了這個標頭，改用不帶標頭的請求
+    }
+  }
+  return fetch(url, { signal });
+}
+
 async function fetchJSON(url, outerSignal) {
   // 一律先試直接連線，再試上次成功的中繼
   const order = [0, routeIndex, ...ROUTES.keys()].filter((v, i, a) => a.indexOf(v) === i && ROUTES[v]);
@@ -341,12 +356,12 @@ async function fetchJSON(url, outerSignal) {
     const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
       if (i !== 0) setStatus(`連線比較慢，換一條路線再試（${ROUTES[i].name}）…`, 'loading');
-      let res = await fetch(ROUTES[i].wrap(url), { signal: ctrl.signal });
+      let res = i === 0 ? await fetchDirect(url, ctrl.signal) : await fetch(ROUTES[i].wrap(url), { signal: ctrl.signal });
       if (i === 0 && res.status >= 500) {
         // 直接連線有通，但 LRCLIB 伺服器出錯：等一下再試一次
         setStatus('歌詞網站回應有點慢，再試一次…', 'loading');
         await sleep(1500);
-        res = await fetch(url, { signal: ctrl.signal });
+        res = await fetchDirect(url, ctrl.signal);
         if (res.status >= 500) throw new OutageError(res.status);
       }
       if (!res.ok) throw new Error('HTTP ' + res.status);
