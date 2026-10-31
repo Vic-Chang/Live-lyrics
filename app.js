@@ -246,6 +246,51 @@ els.lyrics.addEventListener('wheel', (e) => {
 }, { passive: false });
 setFont(store.get('lyricSize', 26));
 
+/* ======================= 簡體 → 正體 =======================
+ * 歌詞是簡體中文時，轉成正體中文（台灣字形）顯示；其他語言不更動。
+ * 使用 opencc-js（從 jsDelivr 載入），載入失敗就顯示原文。
+ */
+const OPENCC_URL = 'https://cdn.jsdelivr.net/npm/opencc-js@1.4.2/dist/umd/cn2t.js';
+let s2tPromise = null;
+
+function loadS2T() {
+  if (!s2tPromise) {
+    s2tPromise = new Promise((resolve) => {
+      const sc = document.createElement('script');
+      sc.src = OPENCC_URL;
+      sc.async = true;
+      sc.onload = () => {
+        try { resolve(window.OpenCC.Converter({ from: 'cn', to: 'tw' })); } catch { resolve(null); }
+      };
+      sc.onerror = () => { s2tPromise = null; resolve(null); }; // 下次搜尋再試
+      document.head.appendChild(sc);
+    });
+  }
+  return s2tPromise;
+}
+
+// 最多等 4 秒，等不到就先顯示原文
+function getS2T() {
+  return Promise.race([loadS2T(), new Promise((r) => setTimeout(() => r(null), 4000))]);
+}
+
+const HAN_RE = /\p{Script=Han}/u;
+const KANA_RE = /[\p{Script=Hiragana}\p{Script=Katakana}]/u; // 有假名 = 日文
+
+// 中文歌（有漢字、沒有日文假名）才轉換；英文、韓文、日文等原樣保留
+function toTraditionalSong(r, conv) {
+  if (!conv) return r;
+  const all = [r.trackName, r.artistName, r.albumName, r.syncedLyrics, r.plainLyrics].filter(Boolean).join('\n');
+  if (!HAN_RE.test(all) || KANA_RE.test(all)) return r;
+  const out = { ...r };
+  for (const k of ['trackName', 'artistName', 'albumName', 'syncedLyrics', 'plainLyrics']) {
+    if (typeof out[k] === 'string' && HAN_RE.test(out[k])) out[k] = conv(out[k]);
+  }
+  return out;
+}
+
+loadS2T(); // 開啟頁面時先在背景載入
+
 /* ======================= 搜尋 ======================= */
 let searchCtrl = null;
 
@@ -296,7 +341,11 @@ async function search(q) {
   els.results.innerHTML = '';
 
   try {
-    let list = await fetchJSON(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, searchCtrl.signal);
+    const signal = searchCtrl.signal;
+    let list = await fetchJSON(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, signal);
+    const conv = await getS2T();
+    if (signal.aborted) return;
+    list = list.map((r) => toTraditionalSong(r, conv));
     // 有時間軸（可滾動）的歌詞排前面
     list = list
       .filter((r) => r.syncedLyrics || r.plainLyrics || r.instrumental)
