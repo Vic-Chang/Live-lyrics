@@ -3,8 +3,13 @@
 /* ======================= 元素 ======================= */
 const $ = (id) => document.getElementById(id);
 const els = {
-  form: $('searchForm'), input: $('searchInput'), mic: $('micBtn'), lang: $('voiceLang'),
-  status: $('status'), results: $('results'),
+  form: $('searchForm'), input: $('searchInput'), mic: $('micBtn'),
+  voicePanel: $('voicePanel'), voiceTitle: $('voiceTitle'), voiceText: $('voiceText'),
+  voiceDone: $('voiceDone'), voiceCancel: $('voiceCancel'),
+  langChips: document.querySelectorAll('.voice-langs .chip'),
+  status: $('status'), results: $('results'), resultCount: $('resultCount'),
+  examples: $('examples'), legend: $('legend'), tip: $('tip'), tipClose: $('tipClose'),
+  stage: document.querySelector('.stage'),
   title: $('songTitle'), artist: $('songArtist'), lyrics: $('lyrics'),
   play: $('playBtn'), seek: $('seek'), cur: $('curTime'), dur: $('durTime'),
   fontDown: $('fontDown'), fontUp: $('fontUp'), fontRange: $('fontRange'),
@@ -32,7 +37,17 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 忽略 */ } },
 };
-const setStatus = (msg) => { els.status.textContent = msg; };
+// type：'' 一般、'loading' 讀取中、'error' 錯誤；detail 是給進階使用者看的細節
+function setStatus(msg, type = '', detail = '') {
+  els.status.className = 'status' + (type ? ' ' + type : '');
+  els.status.textContent = msg;
+  if (detail) {
+    const d = document.createElement('span');
+    d.className = 'detail';
+    d.textContent = detail;
+    els.status.appendChild(d);
+  }
+}
 
 /* ======================= 播放計時器 =======================
  * 不播放音樂，只用計時器讓歌詞依時間軸滾動。
@@ -66,7 +81,11 @@ const player = {
   },
 };
 
-function updatePlayBtn() { els.play.textContent = player.playing ? '❚❚' : '▶'; }
+function updatePlayBtn() {
+  els.play.textContent = player.playing ? '❚❚' : '▶';
+  els.play.setAttribute('aria-label', player.playing ? '暫停' : '播放');
+  els.play.title = (player.playing ? '暫停' : '播放') + '（空白鍵）';
+}
 function enableControls() {
   const ok = state.lines.length > 0;
   els.play.disabled = !ok;
@@ -220,7 +239,8 @@ document.addEventListener('keydown', (e) => {
 /* ======================= 歌詞時間微調 ======================= */
 function setOffset(v) {
   state.offset = Math.round(v * 10) / 10;
-  els.offVal.textContent = (state.offset > 0 ? '+' : '') + state.offset.toFixed(1) + 's';
+  els.offVal.textContent = state.offset === 0 ? '準時'
+    : `${state.offset > 0 ? '快' : '慢'} ${Math.abs(state.offset).toFixed(1)} 秒`;
   tick(true);
 }
 els.offUp.addEventListener('click', () => setOffset(state.offset + 0.5));
@@ -313,7 +333,7 @@ async function fetchJSON(url, outerSignal) {
     outerSignal.addEventListener('abort', onAbort);
     const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
-      if (i !== 0) setStatus(`改用${ROUTES[i].name}搜尋中…`);
+      if (i !== 0) setStatus(`連線比較慢，換一條路線再試（${ROUTES[i].name}）…`, 'loading');
       const res = await fetch(ROUTES[i].wrap(url), { signal: ctrl.signal });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
@@ -334,28 +354,40 @@ async function fetchJSON(url, outerSignal) {
 
 async function search(q) {
   q = q.trim();
-  if (!q) { setStatus('請輸入要搜尋的內容。'); return; }
+  if (!q) { setStatus('請先輸入歌名或歌手。', 'error'); els.input.focus(); return; }
   if (searchCtrl) searchCtrl.abort();
   searchCtrl = new AbortController();
-  setStatus(`正在搜尋「${q}」…`);
+  els.input.value = q;
+  setStatus(`正在搜尋「${q}」…`, 'loading');
   els.results.innerHTML = '';
+  els.resultCount.textContent = '';
+  els.examples.hidden = true;
+  els.legend.hidden = true;
 
   try {
     const signal = searchCtrl.signal;
     let list = await fetchJSON(`${LRCLIB}/search?q=${encodeURIComponent(q)}`, signal);
     const conv = await getS2T();
     if (signal.aborted) return;
-    list = list.map((r) => toTraditionalSong(r, conv));
-    // 有時間軸（可滾動）的歌詞排前面
     list = list
-      .filter((r) => r.syncedLyrics || r.plainLyrics || r.instrumental)
+      .map((r) => toTraditionalSong(r, conv))
+      .filter((r) => r.syncedLyrics || r.plainLyrics)
+      // 會跟著捲動（有時間）的歌詞排前面
       .sort((a, b) => (b.syncedLyrics ? 1 : 0) - (a.syncedLyrics ? 1 : 0))
       .slice(0, 40);
     renderResults(list);
-    setStatus(list.length ? `找到 ${list.length} 首，點一首就會開始播放歌詞。` : `找不到「${q}」的歌詞，換個關鍵字試試看。`);
+    if (list.length) {
+      els.resultCount.textContent = `共 ${list.length} 首`;
+      els.legend.hidden = false;
+      setStatus('點一首歌，歌詞就會開始捲動。');
+    } else {
+      setStatus(`找不到「${q}」的歌詞。可以試試只打歌名，或換成歌手名字。`, 'error');
+      els.examples.hidden = false;
+    }
   } catch (err) {
     if (err.name === 'AbortError') return;
-    setStatus('搜尋失敗，所有連線方式都連不上歌詞網站。可能是公司網路或瀏覽器外掛（例如廣告封鎖）擋住了，請換個網路（例如手機 4G/5G）或關掉外掛再試。詳細：' + err.message);
+    setStatus('連不上歌詞網站。可能是網路（例如公司網路）或瀏覽器外掛（例如廣告封鎖）擋住了，請換個網路（例如手機 4G/5G）或關掉外掛再試。', 'error', '詳細：' + err.message);
+    els.examples.hidden = false;
   }
 }
 
@@ -363,25 +395,37 @@ function renderResults(list) {
   els.results.innerHTML = '';
   list.forEach((r) => {
     const li = document.createElement('li');
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+
+    const main = document.createElement('div');
+    main.className = 'r-main';
     const title = document.createElement('div');
     title.className = 'r-title';
     title.textContent = r.trackName || '（未知歌名）';
-    const meta = document.createElement('div');
-    meta.className = 'r-meta';
-    const who = document.createElement('span');
-    who.textContent = [r.artistName, r.albumName].filter(Boolean).join(' · ');
-    const dur = document.createElement('span');
-    dur.textContent = r.duration ? fmt(r.duration) : '';
+    const artist = document.createElement('div');
+    artist.className = 'r-artist';
+    artist.textContent = [r.artistName, r.albumName].filter(Boolean).join(' · ');
+    main.append(title, artist);
+
+    const side = document.createElement('div');
+    side.className = 'r-side';
     const badge = document.createElement('span');
     badge.className = 'badge' + (r.syncedLyrics ? ' synced' : '');
-    badge.textContent = r.syncedLyrics ? '滾動歌詞' : r.instrumental ? '純音樂' : '純文字';
-    meta.append(who, dur, badge);
-    li.append(title, meta);
-    li.addEventListener('click', () => {
+    badge.textContent = r.syncedLyrics ? '✓ 會跟著捲動' : '只有文字';
+    const dur = document.createElement('span');
+    dur.className = 'r-dur';
+    dur.textContent = r.duration ? fmt(r.duration) : '';
+    side.append(badge, dur);
+
+    li.append(main, side);
+    const pick = () => {
       els.results.querySelectorAll('li.active').forEach((x) => x.classList.remove('active'));
       li.classList.add('active');
       loadSong(r);
-    });
+    };
+    li.addEventListener('click', pick);
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
     els.results.appendChild(li);
   });
 }
@@ -413,7 +457,21 @@ function loadSong(r) {
 
   // 選好歌就直接從頭開始播放、歌詞開始滾動
   if (state.lines.length) { player.seek(0); player.play(); }
+
+  // 第一次選歌時提示「可以點歌詞跳段落」
+  if (!store.get('tipSeen', false)) els.tip.hidden = false;
+
+  // 手機版：選歌後自動捲到歌詞區
+  if (window.matchMedia('(max-width: 800px)').matches) {
+    els.stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
+
+els.tipClose.addEventListener('click', () => { els.tip.hidden = true; store.set('tipSeen', true); });
+
+// 範例歌曲：點了直接搜尋
+els.examples.querySelectorAll('.chip').forEach((b) =>
+  b.addEventListener('click', () => search(b.textContent)));
 
 els.form.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -422,62 +480,101 @@ els.form.addEventListener('submit', (e) => {
 
 /* ======================= 語音輸入 ======================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const LANG_NAMES = { 'zh-TW': '國語', 'zh-HK': '粵語', 'en-US': '英文', 'ja-JP': '日文', 'ko-KR': '韓文' };
+let voiceLang = store.get('voiceLang', 'zh-TW');
+if (!LANG_NAMES[voiceLang]) voiceLang = 'zh-TW';
 let recog = null;
-let listening = false;
+let voiceSession = 0; // 換語言或取消時，讓舊的辨識結果失效
 
-els.lang.value = store.get('voiceLang', 'zh-TW');
-els.lang.addEventListener('change', () => store.set('voiceLang', els.lang.value));
-
-if (!SR) {
-  els.mic.title = '這個瀏覽器不支援語音輸入（請使用 Chrome、Edge 或 Safari）';
-  els.mic.style.opacity = .4;
+function markLangChips() {
+  els.langChips.forEach((c) => c.classList.toggle('on', c.dataset.lang === voiceLang));
 }
 
-els.mic.addEventListener('click', () => {
+function closeVoicePanel() {
+  els.voicePanel.hidden = true;
+  els.mic.classList.remove('listening');
+}
+
+function startListening() {
   if (!SR) {
-    setStatus('這個瀏覽器不支援語音輸入，請改用 Chrome、Edge 或 Safari。');
+    setStatus('這個瀏覽器不支援用說的搜尋，請改用 Chrome、Edge 或 Safari，或直接打字。', 'error');
     return;
   }
-  if (listening) { recog && recog.stop(); return; }
+  if (recog) { try { recog.abort(); } catch { /* 忽略 */ } }
+
+  const session = ++voiceSession;
+  let finalText = '';
+  let cancelled = false;
 
   recog = new SR();
-  recog.lang = els.lang.value;
+  recog.lang = voiceLang;
   recog.interimResults = true;
   recog.maxAlternatives = 1;
   recog.continuous = false;
 
-  let finalText = '';
-  recog.onstart = () => {
-    listening = true;
-    els.mic.classList.add('listening');
-    setStatus('🎤 請說出歌名、歌手或一句歌詞…');
-  };
+  els.voicePanel.hidden = false;
+  els.mic.classList.add('listening');
+  els.voiceText.textContent = '';
+  els.voiceTitle.textContent = `正在聽（${LANG_NAMES[voiceLang]}）…請說出歌名或歌手`;
+  markLangChips();
+
   recog.onresult = (e) => {
+    if (session !== voiceSession) return;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const txt = e.results[i][0].transcript;
       if (e.results[i].isFinal) finalText += txt; else interim += txt;
     }
-    els.input.value = (finalText + interim).trim();
+    els.voiceText.textContent = (finalText + interim).trim();
   };
   recog.onerror = (e) => {
+    if (session !== voiceSession) return;
+    if (e.error === 'aborted') return;
+    cancelled = true;
     const msg = {
-      'not-allowed': '麥克風權限被拒絕，請在瀏覽器允許使用麥克風。',
-      'no-speech': '沒有聽到聲音，請再試一次。',
-      'audio-capture': '找不到麥克風。',
-      'network': '語音辨識需要網路連線。',
-    }[e.error] || '語音辨識錯誤：' + e.error;
-    setStatus(msg);
+      'not-allowed': '沒有麥克風權限。請按網址列左邊的圖示，允許這個網頁使用麥克風。',
+      'service-not-allowed': '沒有麥克風權限。請按網址列左邊的圖示，允許這個網頁使用麥克風。',
+      'no-speech': '沒有聽到聲音，請靠近麥克風再按一次「用說的」。',
+      'audio-capture': '找不到麥克風，請確認麥克風有接好。',
+      'network': '用說的搜尋需要網路，請檢查網路連線。',
+    }[e.error] || '語音辨識出了問題（' + e.error + '），請再試一次或直接打字。';
+    setStatus(msg, 'error');
   };
   recog.onend = () => {
-    listening = false;
-    els.mic.classList.remove('listening');
-    const q = finalText.trim() || els.input.value.trim();
-    if (q) search(q);
+    if (session !== voiceSession) return; // 已經換語言重新開始
+    closeVoicePanel();
+    const q = (finalText || els.voiceText.textContent).trim();
+    if (!cancelled && q) search(q);
   };
+  // 取消：不搜尋
+  recog.cancel = () => { cancelled = true; try { recog.abort(); } catch { /* 忽略 */ } };
 
-  try { recog.start(); } catch (err) { setStatus('無法啟動語音辨識：' + err.message); }
+  try { recog.start(); } catch (err) {
+    closeVoicePanel();
+    setStatus('無法開始語音辨識：' + err.message, 'error');
+  }
+}
+
+if (!SR) {
+  els.mic.title = '這個瀏覽器不支援用說的搜尋（請使用 Chrome、Edge 或 Safari）';
+  els.mic.style.opacity = .5;
+}
+
+els.mic.addEventListener('click', () => {
+  if (!els.voicePanel.hidden && recog) { recog.stop(); return; } // 再按一次 = 說完了
+  startListening();
 });
+els.voiceDone.addEventListener('click', () => { if (recog) recog.stop(); });
+els.voiceCancel.addEventListener('click', () => {
+  if (recog && recog.cancel) recog.cancel();
+  closeVoicePanel();
+});
+els.langChips.forEach((c) => c.addEventListener('click', () => {
+  voiceLang = c.dataset.lang;
+  store.set('voiceLang', voiceLang);
+  startListening(); // 用新的語言重新聽
+}));
+markLangChips();
 
 /* ======================= 讓第一句／最後一句也能置中 ======================= */
 new ResizeObserver(() => {

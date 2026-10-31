@@ -8,63 +8,126 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>🎵 Live Lyrics</h1>
-    <form id="searchForm" class="search" autocomplete="off">
-      <input id="searchInput" type="search" placeholder="輸入歌名／歌手／一句歌詞…" aria-label="搜尋歌詞" />
-      <select id="voiceLang" title="語音辨識語言" aria-label="語音辨識語言">
-        <option value="zh-TW">中文（台灣）</option>
-        <option value="zh-CN">中文（中國）</option>
-        <option value="zh-HK">粵語</option>
-        <option value="en-US">English</option>
-        <option value="ja-JP">日本語</option>
-        <option value="ko-KR">한국어</option>
-      </select>
-      <button id="micBtn" type="button" class="icon-btn" title="語音搜尋" aria-label="語音搜尋">🎤</button>
-      <button type="submit" class="primary">搜尋</button>
+    <div class="brand">
+      <span class="logo" aria-hidden="true">♪</span>
+      <div>
+        <h1>Live Lyrics</h1>
+        <p class="tagline">搜尋歌名，歌詞就會跟著時間自動捲動</p>
+      </div>
+    </div>
+
+    <form id="searchForm" class="search" role="search" autocomplete="off">
+      <label class="search-box">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input id="searchInput" type="search" placeholder="輸入歌名或歌手，例如：晴天" aria-label="輸入歌名或歌手" />
+      </label>
+      <button id="micBtn" type="button" class="btn mic" title="用說的搜尋">
+        <span aria-hidden="true">🎤</span><span class="btn-label">用說的</span>
+      </button>
+      <button type="submit" class="btn primary">搜尋</button>
     </form>
   </header>
 
+  <!-- 語音面板：按下「用說的」才出現 -->
+  <section id="voicePanel" class="voice" hidden aria-live="polite">
+    <div class="voice-icon" aria-hidden="true">🎤</div>
+    <div class="voice-body">
+      <div id="voiceTitle" class="voice-title">正在聽…請說出歌名或歌手</div>
+      <div id="voiceText" class="voice-text"></div>
+      <div class="voice-langs">
+        <span>我說的是：</span>
+        <button type="button" class="chip" data-lang="zh-TW">國語</button>
+        <button type="button" class="chip" data-lang="zh-HK">粵語</button>
+        <button type="button" class="chip" data-lang="en-US">英文</button>
+        <button type="button" class="chip" data-lang="ja-JP">日文</button>
+        <button type="button" class="chip" data-lang="ko-KR">韓文</button>
+      </div>
+    </div>
+    <div class="voice-actions">
+      <button id="voiceDone" type="button" class="btn primary">說完了</button>
+      <button id="voiceCancel" type="button" class="btn">取消</button>
+    </div>
+  </section>
+
   <main class="layout">
     <aside class="sidebar">
-      <section class="panel">
+      <div class="side-head">
         <h2>搜尋結果</h2>
-        <p id="status" class="status">輸入關鍵字，或按 🎤 用說的來搜尋。</p>
-        <ul id="results" class="results"></ul>
-      </section>
+        <span id="resultCount" class="count"></span>
+      </div>
+      <div id="status" class="status" role="status"></div>
+
+      <div id="examples" class="examples">
+        <p>不知道搜什麼？點一首試試看：</p>
+        <div class="chips">
+          <button type="button" class="chip">晴天</button>
+          <button type="button" class="chip">告白氣球</button>
+          <button type="button" class="chip">小幸運</button>
+          <button type="button" class="chip">稻香</button>
+          <button type="button" class="chip">Shape of You</button>
+        </div>
+      </div>
+
+      <ul id="results" class="results"></ul>
+
+      <div id="legend" class="legend" hidden>
+        <div><span class="badge synced">✓ 會跟著捲動</span> 歌詞有標時間，捲動最準</div>
+        <div><span class="badge">只有文字</span> 沒有時間，捲動速度是估算的</div>
+      </div>
     </aside>
 
     <section class="stage">
       <div class="now">
-        <div>
-          <div id="songTitle" class="song-title">尚未選擇歌曲</div>
+        <div class="now-info">
+          <div class="eyebrow">正在播放</div>
+          <div id="songTitle" class="song-title">還沒選歌</div>
           <div id="songArtist" class="song-artist"></div>
         </div>
-        <div class="font-ctrl" aria-label="歌詞大小">
-          <button id="fontDown" class="icon-btn" title="縮小歌詞">A−</button>
-          <input id="fontRange" type="range" min="14" max="64" step="1" value="26" aria-label="歌詞字級" />
-          <button id="fontUp" class="icon-btn" title="放大歌詞">A+</button>
+        <div class="font-ctrl" role="group" aria-label="字體大小">
+          <span class="ctrl-label">字體大小</span>
+          <button id="fontDown" type="button" class="btn icon" aria-label="字變小">A−</button>
+          <input id="fontRange" type="range" min="14" max="64" step="1" value="26" aria-label="字體大小" />
+          <button id="fontUp" type="button" class="btn icon big-a" aria-label="字變大">A+</button>
         </div>
+      </div>
+
+      <div id="tip" class="tip" hidden>
+        <span>💡 點任何一句歌詞，就會從那一句開始。</span>
+        <button id="tipClose" type="button" class="btn small">知道了</button>
       </div>
 
       <div id="lyrics" class="lyrics" tabindex="0">
-        <div class="placeholder">搜尋歌曲並點選後，歌詞會在這裡自動滾動。<br />點任何一行歌詞，就會跳到那一段繼續播放。</div>
+        <div class="guide">
+          <h3>三個步驟開始</h3>
+          <ol>
+            <li><b>搜尋</b>在上方輸入歌名，或按「🎤 用說的」</li>
+            <li><b>選歌</b>在搜尋結果點一首，歌詞會自動開始捲動</li>
+            <li><b>跳段落</b>點任何一句歌詞，就從那一句繼續</li>
+          </ol>
+        </div>
       </div>
 
       <div class="controls">
-        <button id="playBtn" class="play" title="播放／暫停（空白鍵）" disabled>▶</button>
-        <span id="curTime" class="time">0:00</span>
-        <input id="seek" type="range" min="0" max="0" step="0.1" value="0" disabled aria-label="播放進度" />
-        <span id="durTime" class="time">0:00</span>
-        <div class="offset" title="覺得歌詞太快或太慢時可以微調">
-          <button id="offDown" class="icon-btn small" aria-label="歌詞延後 0.5 秒">−</button>
-          <span id="offVal">0.0s</span>
-          <button id="offUp" class="icon-btn small" aria-label="歌詞提早 0.5 秒">+</button>
+        <button id="playBtn" type="button" class="play" aria-label="播放" disabled>▶</button>
+        <div class="progress">
+          <span id="curTime" class="time">0:00</span>
+          <input id="seek" type="range" min="0" max="0" step="0.1" value="0" disabled aria-label="播放進度" />
+          <span id="durTime" class="time">0:00</span>
+        </div>
+        <div class="offset" role="group" aria-label="歌詞時間調整">
+          <span class="ctrl-label">歌詞時間</span>
+          <button id="offDown" type="button" class="btn small" title="歌詞比歌快時按這裡">慢一點</button>
+          <span id="offVal" class="off-val">準時</span>
+          <button id="offUp" type="button" class="btn small" title="歌詞比歌慢時按這裡">快一點</button>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="foot">歌詞資料來源：<a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a></footer>
+  <footer class="foot">
+    <span>快速鍵：<kbd>空白鍵</kbd> 播放／暫停　<kbd>←</kbd><kbd>→</kbd> 倒退／快轉 5 秒</span>
+    <span>歌詞來源：<a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a></span>
+  </footer>
 
   <script src="app.js"></script>
 </body>
